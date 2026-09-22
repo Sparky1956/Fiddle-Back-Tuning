@@ -3,11 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <title>Fiddle Back Tones</title>
+  <style>
+    body {
+      font-size: 20px;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 30px;
+    }
+    label {
+      font-size: 22px;
+    }
+    select, input[type=range], button {
+      font-size: 20px;
+      margin: 10px;
+    }
+    #freqDisplay {
+      font-weight: bold;
+      font-size: 24px;
+    }
+  </style>
 </head>
 <body>
 
   <!-- Centered title block -->
-  <div style="text-align:center; margin-bottom:20px;">
+  <div style="margin-bottom:20px;">
     <h2>Jon set this up for Jim to tune fiddle backs</h2>
     <p>
       Choose a note and press <strong>Play tone</strong>.<br>
@@ -16,108 +35,7 @@
   </div>
   <hr>
 
-  <h1 style="text-align:center;">Fiddle Back Tones</h1>
+  <h1>Fiddle Back Tones</h1>
 
-  <!-- Base pitch selection -->
-  <label for="baseNote">Base note:</label>
-  <select id="baseNote">
-    <option value="196">G3 (196 Hz)</option>
-    <option value="220">A3 (220 Hz)</option>
-    <option value="246.94">B3 (246.94 Hz)</option>
-    <option value="261.63">C4 (261.63 Hz)</option>
-    <option value="293.66">D4 (293.66 Hz)</option>
-    <option value="329.63">E4 (329.63 Hz)</option>
-    <option value="392">G4 (392 Hz)</option>
-  </select>
-
-  <br><br>
-
-  <!-- Pitch shift slider in cents -->
-  <label for="pitchShift">Pitch shift (cents): </label>
-  <input type="range" id="pitchShift" min="-200" max="200" value="0" step="1">
-  <span id="pitchShiftValue">0</span> cents
-
-  <br><br>
-
-  <!-- Display effective frequency -->
-  <div>
-    Effective frequency: <span id="freqDisplay">220</span> Hz
-  </div>
-
-  <br>
-
-  <!-- Play / stop buttons -->
-  <button id="playBtn">Play tone</button>
-  <button id="stopBtn" disabled>Stop</button>
-
-  <script>
-    let audioCtx = null;
-    let osc = null;
-
-    const baseNote = document.getElementById('baseNote');
-    const pitchShift = document.getElementById('pitchShift');
-    const pitchShiftValue = document.getElementById('pitchShiftValue');
-    const freqDisplay = document.getElementById('freqDisplay');
-    const playBtn = document.getElementById('playBtn');
-    const stopBtn = document.getElementById('stopBtn');
-
-    function centsToRatio(cents) {
-      return Math.pow(2, cents / 1200);
-    }
-
-    function updateFrequencyDisplay() {
-      const baseFreq = parseFloat(baseNote.value);
-      const cents = parseFloat(pitchShift.value);
-      const ratio = centsToRatio(cents);
-      const effFreq = baseFreq * ratio;
-      freqDisplay.textContent = effFreq.toFixed(2);
-      pitchShiftValue.textContent = cents;
-      if (osc) {
-        osc.frequency.setValueAtTime(effFreq, audioCtx.currentTime);
-      }
-    }
-
-    baseNote.addEventListener('change', updateFrequencyDisplay);
-    pitchShift.addEventListener('input', updateFrequencyDisplay);
-
-    playBtn.addEventListener('click', () => {
-      if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      if (osc) {
-        osc.stop();
-        osc.disconnect();
-      }
-      const baseFreq = parseFloat(baseNote.value);
-      const cents = parseFloat(pitchShift.value);
-      const ratio = centsToRatio(cents);
-      const effFreq = baseFreq * ratio;
-
-      osc = audioCtx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(effFreq, audioCtx.currentTime);
-      osc.connect(audioCtx.destination);
-      osc.start();
-
-      freqDisplay.textContent = effFreq.toFixed(2);
-      pitchShiftValue.textContent = cents;
-
-      playBtn.disabled = true;
-      stopBtn.disabled = false;
-    });
-
-    stopBtn.addEventListener('click', () => {
-      if (osc) {
-        osc.stop();
-        osc.disconnect();
-        osc = null;
-      }
-      playBtn.disabled = false;
-      stopBtn.disabled = true;
-    });
-
-    updateFrequencyDisplay();
-  </script>
-
-</body>
-</html>
+  <!-- Frequency slider (55 Hz to 880 Hz) -->
+  <label for="freqSlider">Frequency (55–880 Hz):</label><br>
