@@ -51,4 +51,73 @@
   <button id="stopBtn" disabled>Stop</button>
 
   <script>
-    let audioCtx = null
+    let audioCtx = null;
+    let osc = null;
+
+    const baseNote = document.getElementById('baseNote');
+    const pitchShift = document.getElementById('pitchShift');
+    const pitchShiftValue = document.getElementById('pitchShiftValue');
+    const freqDisplay = document.getElementById('freqDisplay');
+    const playBtn = document.getElementById('playBtn');
+    const stopBtn = document.getElementById('stopBtn');
+
+    function centsToRatio(cents) {
+      return Math.pow(2, cents / 1200);
+    }
+
+    function updateFrequencyDisplay() {
+      const baseFreq = parseFloat(baseNote.value);
+      const cents = parseFloat(pitchShift.value);
+      const ratio = centsToRatio(cents);
+      const effFreq = baseFreq * ratio;
+      freqDisplay.textContent = effFreq.toFixed(2);
+      pitchShiftValue.textContent = cents;
+      if (osc) {
+        osc.frequency.setValueAtTime(effFreq, audioCtx.currentTime);
+      }
+    }
+
+    baseNote.addEventListener('change', updateFrequencyDisplay);
+    pitchShift.addEventListener('input', updateFrequencyDisplay);
+
+    playBtn.addEventListener('click', () => {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (osc) {
+        osc.stop();
+        osc.disconnect();
+      }
+      const baseFreq = parseFloat(baseNote.value);
+      const cents = parseFloat(pitchShift.value);
+      const ratio = centsToRatio(cents);
+      const effFreq = baseFreq * ratio;
+
+      osc = audioCtx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(effFreq, audioCtx.currentTime);
+      osc.connect(audioCtx.destination);
+      osc.start();
+
+      freqDisplay.textContent = effFreq.toFixed(2);
+      pitchShiftValue.textContent = cents;
+
+      playBtn.disabled = true;
+      stopBtn.disabled = false;
+    });
+
+    stopBtn.addEventListener('click', () => {
+      if (osc) {
+        osc.stop();
+        osc.disconnect();
+        osc = null;
+      }
+      playBtn.disabled = false;
+      stopBtn.disabled = true;
+    });
+
+    updateFrequencyDisplay();
+  </script>
+
+</body>
+</html>
