@@ -21,6 +21,20 @@
       font-weight: bold;
       font-size: 24px;
     }
+
+    /* Make sliders twice as large */
+    .big-slider {
+      width: 140%;     /* double the original width */
+      max-width: 900px; /* prevent runaway size on large screens */
+    }
+
+    /* Center the oversized slider cleanly */
+    .slider-container {
+      display: flex;
+      justify-content: center;
+      width: 100%;
+      overflow: visible;
+    }
   </style>
 </head>
 <body>
@@ -40,7 +54,6 @@
   <!-- Note selector A2–A6 -->
   <label for="noteSelect">Choose a note:</label><br>
   <select id="noteSelect">
-    <!-- A2 to A6, chromatic -->
     <option value="110">A2 (110 Hz)</option>
     <option value="116.54">A#2/Bb2 (116.54 Hz)</option>
     <option value="123.47">B2 (123.47 Hz)</option>
@@ -104,7 +117,9 @@
 
   <!-- Pitch shift slider -->
   <label for="pitchShift">Pitch shift (cents):</label><br>
-  <input type="range" id="pitchShift" min="-200" max="200" value="0" step="1" style="width:70%;">
+  <div class="slider-container">
+    <input type="range" id="pitchShift" min="-200" max="200" value="0" step="1" class="big-slider">
+  </div>
   <div><span id="pitchShiftValue">0</span> cents</div>
 
   <br><br>
