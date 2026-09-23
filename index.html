@@ -22,13 +22,10 @@
       font-size: 24px;
     }
 
-    /* Make sliders twice as large */
     .big-slider {
-      width: 140%;     /* double the original width */
-      max-width: 900px; /* prevent runaway size on large screens */
+      width: 140%;
+      max-width: 900px;
     }
-
-    /* Center the oversized slider cleanly */
     .slider-container {
       display: flex;
       justify-content: center;
@@ -39,19 +36,18 @@
 </head>
 <body>
 
-  <!-- Centered title block -->
   <div style="margin-bottom:20px;">
     <h2>Jon set this up for Jim to tune fiddle backs</h2>
     <p>
       Choose a note and press <strong>Play tone</strong>.<br>
-      You can move the tone a little with the slider.
+      Use the sliders to explore resonance and beating.
     </p>
   </div>
   <hr>
 
-  <h1>Fiddle Back Tones</h1>
+  <h1>Fiddle Back Tones — Dual Oscillator Beats</h1>
 
-  <!-- Note selector A2–A6 -->
+  <!-- Note selector -->
   <label for="noteSelect">Choose a note:</label><br>
   <select id="noteSelect">
     <option value="110">A2 (110 Hz)</option>
@@ -115,32 +111,49 @@
 
   <br><br>
 
-  <!-- Pitch shift slider -->
-  <label for="pitchShift">Pitch shift (cents):</label><br>
+  <!-- Slider 1: detune in cents -->
+  <label for="detune1">Detune (cents):</label><br>
   <div class="slider-container">
-    <input type="range" id="pitchShift" min="-200" max="200" value="0" step="1" class="big-slider">
+    <input type="range" id="detune1" min="-200" max="200" value="0" step="1" class="big-slider">
   </div>
-  <div><span id="pitchShiftValue">0</span> cents</div>
+  <div><span id="detune1Value">0</span> cents</div>
 
   <br><br>
 
-  <!-- Effective frequency -->
-  <div>Effective frequency: <span id="freqDisplay">110</span> Hz</div>
+  <!-- Slider 2: beat detune in Hz -->
+  <label for="detune2">Beat detune (Hz):</label><br>
+  <div class="slider-container">
+    <input type="range" id="detune2" min="-10" max="10" value="0" step="0.1" class="big-slider">
+  </div>
+  <div><span id="detune2Value">0</span> Hz</div>
+
+  <br><br>
+
+  <div>
+    Osc 1 frequency: <span id="freq1Display">110</span> Hz<br>
+    Osc 2 frequency: <span id="freq2Display">110</span> Hz
+  </div>
 
   <br>
 
-  <!-- Play / stop buttons -->
   <button id="playBtn">Play tone</button>
   <button id="stopBtn" disabled>Stop</button>
 
   <script>
     let audioCtx = null;
-    let osc = null;
+    let osc1 = null;
+    let osc2 = null;
 
     const noteSelect = document.getElementById('noteSelect');
-    const pitchShift = document.getElementById('pitchShift');
-    const pitchShiftValue = document.getElementById('pitchShiftValue');
-    const freqDisplay = document.getElementById('freqDisplay');
+    const detune1 = document.getElementById('detune1');
+    const detune2 = document.getElementById('detune2');
+
+    const detune1Value = document.getElementById('detune1Value');
+    const detune2Value = document.getElementById('detune2Value');
+
+    const freq1Display = document.getElementById('freq1Display');
+    const freq2Display = document.getElementById('freq2Display');
+
     const playBtn = document.getElementById('playBtn');
     const stopBtn = document.getElementById('stopBtn');
 
@@ -148,61 +161,73 @@
       return Math.pow(2, cents / 1200);
     }
 
-    function updateFrequencyDisplay() {
+    function updateFrequencies() {
       const baseFreq = parseFloat(noteSelect.value);
-      const cents = parseFloat(pitchShift.value);
-      const ratio = centsToRatio(cents);
-      const effFreq = baseFreq * ratio;
+      const cents = parseFloat(detune1.value);
+      const beatHz = parseFloat(detune2.value);
 
-      freqDisplay.textContent = effFreq.toFixed(2);
-      pitchShiftValue.textContent = cents;
+      const freq1 = baseFreq * centsToRatio(cents);
+      const freq2 = freq1 + beatHz;
 
-      if (osc) {
-        osc.frequency.setValueAtTime(effFreq, audioCtx.currentTime);
-      }
+      freq1Display.textContent = freq1.toFixed(2);
+      freq2Display.textContent = freq2.toFixed(2);
+
+      detune1Value.textContent = cents;
+      detune2Value.textContent = beatHz.toFixed(1);
+
+      if (osc1) osc1.frequency.setValueAtTime(freq1, audioCtx.currentTime);
+      if (osc2) osc2.frequency.setValueAtTime(freq2, audioCtx.currentTime);
     }
 
-    noteSelect.addEventListener('change', updateFrequencyDisplay);
-    pitchShift.addEventListener('input', updateFrequencyDisplay);
+    noteSelect.addEventListener('change', updateFrequencies);
+    detune1.addEventListener('input', updateFrequencies);
+    detune2.addEventListener('input', updateFrequencies);
 
     playBtn.addEventListener('click', () => {
       if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       }
-      if (osc) {
-        osc.stop();
-        osc.disconnect();
-      }
+
+      if (osc1) { osc1.stop(); osc1.disconnect(); }
+      if (osc2) { osc2.stop(); osc2.disconnect(); }
 
       const baseFreq = parseFloat(noteSelect.value);
-      const cents = parseFloat(pitchShift.value);
-      const ratio = centsToRatio(cents);
-      const effFreq = baseFreq * ratio;
+      const cents = parseFloat(detune1.value);
+      const beatHz = parseFloat(detune2.value);
 
-      osc = audioCtx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(effFreq, audioCtx.currentTime);
-      osc.connect(audioCtx.destination);
-      osc.start();
+      const freq1 = baseFreq * centsToRatio(cents);
+      const freq2 = freq1 + beatHz;
 
-      freqDisplay.textContent = effFreq.toFixed(2);
-      pitchShiftValue.textContent = cents;
+      osc1 = audioCtx.createOscillator();
+      osc2 = audioCtx.createOscillator();
+
+      osc1.type = "sine";
+      osc2.type = "sine";
+
+      osc1.frequency.setValueAtTime(freq1, audioCtx.currentTime);
+      osc2.frequency.setValueAtTime(freq2, audioCtx.currentTime);
+
+      osc1.connect(audioCtx.destination);
+      osc2.connect(audioCtx.destination);
+
+      osc1.start();
+      osc2.start();
 
       playBtn.disabled = true;
       stopBtn.disabled = false;
+
+      updateFrequencies();
     });
 
     stopBtn.addEventListener('click', () => {
-      if (osc) {
-        osc.stop();
-        osc.disconnect();
-        osc = null;
-      }
+      if (osc1) { osc1.stop(); osc1.disconnect(); osc1 = null; }
+      if (osc2) { osc2.stop(); osc2.disconnect(); osc2 = null; }
+
       playBtn.disabled = false;
       stopBtn.disabled = true;
     });
 
-    updateFrequencyDisplay();
+    updateFrequencies();
   </script>
 
 </body>
