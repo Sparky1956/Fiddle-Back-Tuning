@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Fiddle Back Tones</title>
   <style>
     body {
@@ -17,9 +18,26 @@
       font-size: 20px;
       margin: 10px;
     }
+    button {
+      padding: 8px 18px;
+    }
     #freq1Display, #freq2Display {
       font-weight: bold;
       font-size: 24px;
+    }
+    .checkbox-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+    .checkbox-label input[type=checkbox] {
+      width: 28px;
+      height: 28px;
+      cursor: pointer;
+    }
+    .disabled {
+      opacity: 0.4;
     }
 
     /* Bigger sliders */
@@ -33,6 +51,47 @@
       width: 100%;
       overflow: visible;
     }
+
+    /* Larger slider thumbs */
+    input[type=range] {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 44px;
+      background: transparent;
+      cursor: pointer;
+    }
+    input[type=range]:disabled {
+      cursor: not-allowed;
+    }
+    input[type=range]::-webkit-slider-runnable-track {
+      height: 10px;
+      background: #ccc;
+      border-radius: 5px;
+    }
+    input[type=range]::-moz-range-track {
+      height: 10px;
+      background: #ccc;
+      border-radius: 5px;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 40px;
+      height: 40px;
+      margin-top: -15px; /* centre thumb on the 10px track */
+      border-radius: 50%;
+      background: #2a6fdb;
+      border: 3px solid #fff;
+      box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+    }
+    input[type=range]::-moz-range-thumb {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: #2a6fdb;
+      border: 3px solid #fff;
+      box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+    }
   </style>
 </head>
 <body>
@@ -41,12 +100,13 @@
     <h2>Jon set this up for Jim to tune fiddle backs</h2>
     <p>
       Choose a note and press <strong>Play tone</strong>.<br>
-      Use the sliders to explore resonance and beating.
+      Plays a pure sine tone by default. Tick <strong>Beat oscillator</strong>
+      to add a second tone and hear beating.
     </p>
   </div>
   <hr>
 
-  <h1>Fiddle Back Tones — Dual Oscillator Beats</h1>
+  <h1>Fiddle Back Tones</h1>
 
   <!-- Note selector: A1 (55 Hz) up to A5 (880 Hz) -->
   <label for="noteSelect">Choose a note:</label><br>
@@ -119,116 +179,243 @@
   </div>
   <div><span id="detune1Value">0</span> cents</div>
 
+  <br>
+
+  <!-- Volume -->
+  <label for="volume">Volume:</label><br>
+  <div class="slider-container">
+    <input type="range" id="volume" min="0" max="100" value="50" step="1" class="big-slider">
+  </div>
+  <div><span id="volumeValue">50</span> %</div>
+
+  <br>
+
+  <!-- Beat oscillator toggle (off = pure sine) -->
+  <label class="checkbox-label" for="beatEnable">
+    <input type="checkbox" id="beatEnable">
+    Beat oscillator
+  </label>
+
   <br><br>
 
   <!-- Slider 2: beat detune in Hz -->
-  <label for="detune2">Beat detune (Hz):</label><br>
-  <div class="slider-container">
-    <input type="range" id="detune2" min="-10" max="10" value="0" step="0.1" class="big-slider">
+  <div id="beatSection" class="disabled">
+    <label for="detune2">Beat detune (Hz):</label><br>
+    <div class="slider-container">
+      <input type="range" id="detune2" min="-5" max="5" value="0" step="0.1" class="big-slider" disabled>
+    </div>
+    <div><span id="detune2Value">0.0</span> Hz</div>
   </div>
-  <div><span id="detune2Value">0.0</span> Hz</div>
 
-  <br><br>
+  <br>
 
   <div>
     Osc 1 frequency: <span id="freq1Display">55.00</span> Hz<br>
-    Osc 2 frequency: <span id="freq2Display">55.00</span> Hz
+    Osc 2 frequency: <span id="freq2Display">off</span><span id="freq2Unit"></span>
   </div>
 
   <br>
 
   <button id="playBtn">Play tone</button>
   <button id="stopBtn" disabled>Stop</button>
+  <button id="resetBtn">Reset</button>
 
   <script>
+    const RAMP = 0.03; // seconds; short fades avoid clicks
+
     let audioCtx = null;
+    let masterGain = null;
     let osc1 = null;
     let osc2 = null;
+    let osc2Gain = null;
+    let playing = false;
 
     const noteSelect = document.getElementById('noteSelect');
     const detune1 = document.getElementById('detune1');
     const detune2 = document.getElementById('detune2');
+    const volume = document.getElementById('volume');
+    const beatEnable = document.getElementById('beatEnable');
+    const beatSection = document.getElementById('beatSection');
 
     const detune1Value = document.getElementById('detune1Value');
     const detune2Value = document.getElementById('detune2Value');
+    const volumeValue = document.getElementById('volumeValue');
 
     const freq1Display = document.getElementById('freq1Display');
     const freq2Display = document.getElementById('freq2Display');
+    const freq2Unit = document.getElementById('freq2Unit');
 
     const playBtn = document.getElementById('playBtn');
     const stopBtn = document.getElementById('stopBtn');
+    const resetBtn = document.getElementById('resetBtn');
 
     function centsToRatio(cents) {
       return Math.pow(2, cents / 1200);
     }
 
-    function updateFrequencies() {
+    function getFrequencies() {
       const baseFreq = parseFloat(noteSelect.value);
       const cents = parseFloat(detune1.value);
       const beatHz = parseFloat(detune2.value);
-
       const freq1 = baseFreq * centsToRatio(cents);
       const freq2 = freq1 + beatHz;
+      return { cents, beatHz, freq1, freq2 };
+    }
 
-      freq1Display.textContent = freq1.toFixed(2);
-      freq2Display.textContent = freq2.toFixed(2);
+    // Master volume. When both oscillators play, halve the level so the
+    // sum doesn't clip and the overall loudness stays similar.
+    function targetMasterLevel() {
+      const v = parseFloat(volume.value) / 100;
+      return beatEnable.checked ? v * 0.5 : v;
+    }
+
+    function rampParam(param, value) {
+      const now = audioCtx.currentTime;
+      param.cancelScheduledValues(now);
+      param.setValueAtTime(param.value, now);
+      param.linearRampToValueAtTime(value, now + RAMP);
+    }
+
+    function updateDisplay() {
+      const { cents, beatHz, freq1, freq2 } = getFrequencies();
 
       detune1Value.textContent = cents;
       detune2Value.textContent = beatHz.toFixed(1);
+      volumeValue.textContent = volume.value;
 
-      if (osc1) osc1.frequency.setValueAtTime(freq1, audioCtx.currentTime);
-      if (osc2) osc2.frequency.setValueAtTime(freq2, audioCtx.currentTime);
+      freq1Display.textContent = freq1.toFixed(2);
+      if (beatEnable.checked) {
+        freq2Display.textContent = freq2.toFixed(2);
+        freq2Unit.textContent = ' Hz';
+      } else {
+        freq2Display.textContent = 'off';
+        freq2Unit.textContent = '';
+      }
+
+      detune2.disabled = !beatEnable.checked;
+      beatSection.classList.toggle('disabled', !beatEnable.checked);
     }
 
-    noteSelect.addEventListener('change', updateFrequencies);
-    detune1.addEventListener('input', updateFrequencies);
-    detune2.addEventListener('input', updateFrequencies);
+    function updateAudio() {
+      if (!playing) return;
+      const { freq1, freq2 } = getFrequencies();
+      const now = audioCtx.currentTime;
+      if (osc1) osc1.frequency.setValueAtTime(freq1, now);
+      if (osc2) osc2.frequency.setValueAtTime(freq2, now);
+      rampParam(masterGain.gain, targetMasterLevel());
+    }
+
+    function update() {
+      updateDisplay();
+      updateAudio();
+    }
+
+    function startOsc2() {
+      if (osc2) return;
+      const { freq2 } = getFrequencies();
+      osc2Gain = audioCtx.createGain();
+      osc2Gain.gain.setValueAtTime(0, audioCtx.currentTime);
+      osc2Gain.connect(masterGain);
+
+      osc2 = audioCtx.createOscillator();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(freq2, audioCtx.currentTime);
+      osc2.connect(osc2Gain);
+      osc2.start();
+
+      rampParam(osc2Gain.gain, 1);
+    }
+
+    function stopOsc2() {
+      if (!osc2) return;
+      const o = osc2;
+      const g = osc2Gain;
+      osc2 = null;
+      osc2Gain = null;
+      rampParam(g.gain, 0);
+      o.stop(audioCtx.currentTime + RAMP + 0.01);
+      o.onended = () => { o.disconnect(); g.disconnect(); };
+    }
+
+    noteSelect.addEventListener('change', update);
+    detune1.addEventListener('input', update);
+    detune2.addEventListener('input', update);
+    volume.addEventListener('input', update);
+
+    beatEnable.addEventListener('change', () => {
+      if (playing) {
+        if (beatEnable.checked) startOsc2(); else stopOsc2();
+      }
+      update();
+    });
 
     playBtn.addEventListener('click', () => {
       if (!audioCtx) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        masterGain = audioCtx.createGain();
+        masterGain.gain.value = 0;
+        masterGain.connect(audioCtx.destination);
       }
+      if (audioCtx.state === 'suspended') audioCtx.resume();
 
-      if (osc1) { osc1.stop(); osc1.disconnect(); }
-      if (osc2) { osc2.stop(); osc2.disconnect(); }
-
-      const baseFreq = parseFloat(noteSelect.value);
-      const cents = parseFloat(detune1.value);
-      const beatHz = parseFloat(detune2.value);
-
-      const freq1 = baseFreq * centsToRatio(cents);
-      const freq2 = freq1 + beatHz;
+      const { freq1 } = getFrequencies();
 
       osc1 = audioCtx.createOscillator();
-      osc2 = audioCtx.createOscillator();
-
-      osc1.type = "sine";
-      osc2.type = "sine";
-
+      osc1.type = 'sine';
       osc1.frequency.setValueAtTime(freq1, audioCtx.currentTime);
-      osc2.frequency.setValueAtTime(freq2, audioCtx.currentTime);
-
-      osc1.connect(audioCtx.destination);
-      osc2.connect(audioCtx.destination);
-
+      osc1.connect(masterGain);
       osc1.start();
-      osc2.start();
+
+      playing = true;
+      if (beatEnable.checked) startOsc2();
+
+      rampParam(masterGain.gain, targetMasterLevel());
 
       playBtn.disabled = true;
       stopBtn.disabled = false;
 
-      updateFrequencies();
+      update();
     });
 
     stopBtn.addEventListener('click', () => {
-      if (osc1) { osc1.stop(); osc1.disconnect(); osc1 = null; }
-      if (osc2) { osc2.stop(); osc2.disconnect(); osc2 = null; }
+      if (!playing) return;
+      playing = false;
+
+      rampParam(masterGain.gain, 0);
+      const stopAt = audioCtx.currentTime + RAMP + 0.01;
+
+      if (osc1) {
+        const o = osc1;
+        osc1 = null;
+        o.stop(stopAt);
+        o.onended = () => o.disconnect();
+      }
+      if (osc2) {
+        const o = osc2;
+        const g = osc2Gain;
+        osc2 = null;
+        osc2Gain = null;
+        o.stop(stopAt);
+        o.onended = () => { o.disconnect(); g.disconnect(); };
+      }
 
       playBtn.disabled = false;
       stopBtn.disabled = true;
     });
 
-    updateFrequencies();
+    // Reset sliders and beat oscillator to defaults (keeps the chosen note).
+    resetBtn.addEventListener('click', () => {
+      detune1.value = 0;
+      detune2.value = 0;
+      volume.value = 50;
+      if (beatEnable.checked) {
+        beatEnable.checked = false;
+        if (playing) stopOsc2();
+      }
+      update();
+    });
+
+    updateDisplay();
   </script>
 
 </body>
