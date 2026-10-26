@@ -49,6 +49,22 @@
       border: 1px solid #ccc;
       border-radius: 4px;
     }
+    .target-box {
+      border: 2px solid #2a6fdb;
+      border-radius: 8px;
+      padding: 10px 16px 16px;
+      margin: 10px auto 20px;
+    }
+    #targetReadout {
+      font-size: 22px;
+      margin: 8px 0;
+      min-height: 56px;
+    }
+    #targetCents {
+      font-size: 40px;
+      font-weight: bold;
+    }
+    #tuner { height: 70px; }
     #spec { height: 340px; }
     #wave { height: 110px; }
     #meter { height: 28px; }
@@ -64,6 +80,16 @@
       font-size: 16px;
       padding: 4px 12px;
       margin: 0;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      max-width: 100%;
+    }
+    @media (max-width: 600px) {
+      body { margin: 16px; }
+      th, td { padding: 4px 5px; font-size: 15px; }
+      td button { font-size: 14px; padding: 4px 8px; }
+      #targetCents { font-size: 32px; }
     }
     .tips {
       text-align: left;
@@ -131,6 +157,37 @@
     <div id="status">Microphone off</div>
     <div id="warn"></div>
 
+    <div class="target-box">
+      <label for="targetNote">Target note:</label>
+      <select id="targetNote">
+        <option value="0">C</option>
+        <option value="1">C#/Db</option>
+        <option value="2">D</option>
+        <option value="3">D#/Eb</option>
+        <option value="4" selected>E</option>
+        <option value="5">F</option>
+        <option value="6">F#/Gb</option>
+        <option value="7">G</option>
+        <option value="8">G#/Ab</option>
+        <option value="9">A</option>
+        <option value="10">A#/Bb</option>
+        <option value="11">B</option>
+      </select>
+      <label for="targetOctave">Octave:</label>
+      <select id="targetOctave">
+        <option value="nearest" selected>Nearest to peak</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5">5</option>
+        <option value="6">6</option>
+      </select>
+
+      <div id="targetReadout">Tap the plate to compare its largest peak with the target note.</div>
+      <canvas id="tuner"></canvas>
+    </div>
+
     <div class="settings">
       <div>
         <label for="threshold">Trigger level:</label>
@@ -179,11 +236,13 @@
     <canvas id="wave"></canvas>
 
     <h2>Peaks</h2>
+    <div class="table-wrap">
     <table id="peakTable">
       <thead>
         <tr>
           <th>Frequency</th>
           <th>Nearest note</th>
+          <th>vs <span id="targetHead">target</span></th>
           <th>Level</th>
           <th>Ring time</th>
           <th>Q</th>
@@ -191,9 +250,10 @@
         </tr>
       </thead>
       <tbody id="peakBody">
-        <tr><td colspan="6">No taps yet</td></tr>
+        <tr><td colspan="7">No taps yet</td></tr>
       </tbody>
     </table>
+    </div>
 
     <button id="csvBtn" disabled>Download peaks (CSV)</button>
     <button id="wavBtn" disabled>Download last tap (WAV)</button>
@@ -205,6 +265,7 @@
       <li>Hold the plate lightly at a point that barely moves (or rest it on soft foam), tap firmly and briefly, and let it ring.</li>
       <li>Keep the microphone 5&ndash;10 cm from the plate in a quiet room.</li>
       <li>Do several taps with the same hold and tap points; the average makes the real peaks stand out. Press <strong>Clear taps</strong> before changing hold or tap position.</li>
+      <li>Choose the <strong>target note</strong> you are tuning towards. The box shows how far the largest peak is from it: minus means flat, plus means sharp, and 100 cents is one semitone. Green is within 5 cents.</li>
       <li>A plate has several modes, not one fundamental. Which ones show up depends on where you hold and tap it.</li>
       <li><strong>Ring time</strong> is how long that peak takes to fade by 20 dB. Longer ring time and higher Q mean less damping. These are estimates.</li>
       <li>A steady peak at 60 or 120 Hz is probably mains hum, not the plate.</li>
@@ -273,6 +334,33 @@
       const cents = Math.round((n - r) * 100);
       const name = NOTE_NAMES[((r % 12) + 12) % 12] + (Math.floor(r / 12) - 1);
       return { name, cents };
+    }
+
+    function noteFreq(pitchClass, octave) {
+      return 440 * Math.pow(2, (pitchClass + 12 * (octave + 1) - 69) / 12);
+    }
+
+    // The target note's frequency. With "Nearest to peak" the octave is
+    // chosen so the target is as close as possible to the given frequency.
+    function targetFor(freq) {
+      const pc = parseInt($('targetNote').value, 10);
+      const sel = $('targetOctave').value;
+      let octave;
+      if (sel === 'nearest') {
+        const n = 12 * Math.log2(freq / 440) + 69;
+        octave = Math.round((n - pc) / 12) - 1;
+      } else {
+        octave = parseInt(sel, 10);
+      }
+      const name = NOTE_NAMES[pc] + octave;
+      return { name, freq: noteFreq(pc, octave) };
+    }
+
+    function centsBetween(f, ref) { return 1200 * Math.log2(f / ref); }
+
+    function formatCents(c) {
+      const v = Math.abs(c) < 0.05 ? 0 : c;
+      return (v > 0 ? '+' : '') + v.toFixed(1) + '¢';
     }
 
     function setStatus(text) { $('status').textContent = text; }
@@ -628,7 +716,42 @@
       if (state !== 'off') requestAnimationFrame(drawMeter);
     }
 
-    function drawSpectrum(db, overlay, peaks, gmax) {
+    // Tuner-style scale from -50 to +50 cents with a needle.
+    function drawTuner(cents) {
+      const { g, w, h } = setupCanvas($('tuner'));
+      const L = 20, R = 20;
+      const x = c => L + (Math.max(-50, Math.min(50, c)) + 50) / 100 * (w - L - R);
+
+      g.fillStyle = '#e8f6ec';
+      g.fillRect(x(-5), 8, x(5) - x(-5), h - 30);
+
+      g.strokeStyle = '#999';
+      g.fillStyle = '#555';
+      g.font = '13px Arial';
+      g.textAlign = 'center';
+      for (let c = -50; c <= 50; c += 10) {
+        const big = c % 50 === 0 || c === 0;
+        g.lineWidth = big ? 2 : 1;
+        g.beginPath(); g.moveTo(x(c), big ? 8 : 18); g.lineTo(x(c), h - 22); g.stroke();
+        g.fillText((c > 0 ? '+' : '') + c, x(c), h - 6);
+      }
+      g.fillText('flat', x(-40), 22);
+      g.fillText('sharp', x(40), 22);
+
+      if (cents === null) return;
+      const a = Math.abs(cents);
+      g.strokeStyle = a <= 5 ? '#1e8e3e' : a <= 20 ? '#d4a017' : '#c0392b';
+      g.lineWidth = 5;
+      const nx = x(cents);
+      g.beginPath(); g.moveTo(nx, 4); g.lineTo(nx, h - 22); g.stroke();
+      if (a > 50) {
+        g.fillStyle = g.strokeStyle;
+        g.font = 'bold 22px Arial';
+        g.fillText(cents < 0 ? '◀' : '▶', cents < 0 ? L - 8 : w - R + 8, h / 2);
+      }
+    }
+
+    function drawSpectrum(db, overlay, peaks, gmax, target) {
       const { g, w, h } = setupCanvas($('spec'));
       const fmin = parseFloat($('fmin').value);
       const fmax = parseFloat($('fmax').value);
@@ -669,6 +792,25 @@
         }
         g.stroke();
       };
+      // Target note: every octave of it in range faintly, the chosen one bold.
+      if (target) {
+        const pc = parseInt($('targetNote').value, 10);
+        g.setLineDash([6, 4]);
+        g.textAlign = 'center';
+        for (let oct = 0; oct <= 8; oct++) {
+          const f = noteFreq(pc, oct);
+          if (f < fmin || f > fmax) continue;
+          const chosen = Math.abs(f - target.freq) < 0.01;
+          g.strokeStyle = chosen ? '#1e8e3e' : '#b7dfc3';
+          g.lineWidth = chosen ? 2 : 1;
+          g.beginPath(); g.moveTo(x(f), T); g.lineTo(x(f), h - B); g.stroke();
+          g.fillStyle = chosen ? '#1e8e3e' : '#8cc79f';
+          g.font = (chosen ? 'bold ' : '') + '13px Arial';
+          g.fillText(NOTE_NAMES[pc] + oct, x(f), h - B - 6);
+        }
+        g.setLineDash([]);
+      }
+
       if (overlay) plot(overlay, '#bbb', 1);
       plot(db, '#2a6fdb', 1.5);
 
@@ -714,7 +856,9 @@
         currentPeaks = [];
         setupCanvas($('spec'));
         drawWave(null);
-        $('peakBody').innerHTML = '<tr><td colspan="6">No taps yet</td></tr>';
+        drawTuner(null);
+        $('targetReadout').textContent = 'Tap the plate to compare its largest peak with the target note.';
+        $('peakBody').innerHTML = '<tr><td colspan="7">No taps yet</td></tr>';
         return;
       }
 
@@ -733,23 +877,49 @@
       }
       currentPeaks = peaks;
 
-      drawSpectrum(db, overlay, peaks, gmax);
+      // Compare the largest peak with the target note.
+      let target = null;
+      if (peaks.length) {
+        const biggest = peaks.reduce((a, b) => (b.db > a.db ? b : a));
+        target = targetFor(biggest.freq);
+        const c = centsBetween(biggest.freq, target.freq);
+        const dHz = biggest.freq - target.freq;
+        const word = Math.abs(c) < 0.05 ? 'in tune' : c < 0 ? 'flat' : 'sharp';
+        $('targetReadout').innerHTML =
+          '<span id="targetCents">' + formatCents(c) + '</span> ' + word + '<br>' +
+          'Largest peak <strong>' + biggest.freq.toFixed(2) + ' Hz</strong> vs ' +
+          target.name + ' <strong>' + target.freq.toFixed(2) + ' Hz</strong> (' +
+          (dHz >= 0 ? '+' : '') + dHz.toFixed(2) + ' Hz)';
+        $('targetCents').style.color =
+          Math.abs(c) <= 5 ? '#1e8e3e' : Math.abs(c) <= 20 ? '#d4a017' : '#c0392b';
+        drawTuner(c);
+      } else {
+        $('targetReadout').textContent = 'No clear peak to compare.';
+        drawTuner(null);
+      }
+      $('targetHead').textContent = NOTE_NAMES[parseInt($('targetNote').value, 10)] +
+        ($('targetOctave').value === 'nearest' ? '' : $('targetOctave').value);
+
+      drawSpectrum(db, overlay, peaks, gmax, target);
       drawWave(last.wave);
 
       const body = $('peakBody');
       body.innerHTML = '';
       if (peaks.length === 0) {
-        body.innerHTML = '<tr><td colspan="6">No clear peaks in this range</td></tr>';
+        body.innerHTML = '<tr><td colspan="7">No clear peaks in this range</td></tr>';
         return;
       }
       for (const pk of peaks) {
         const n = noteName(pk.freq);
+        const t = targetFor(pk.freq);
+        pk.vsTarget = { name: t.name, cents: centsBetween(pk.freq, t.freq) };
         const ring20 = pk.decay ? (20 / pk.decay).toFixed(2) + ' s' : '—';
         const q = pk.decay ? Math.round(Math.PI * pk.freq * 8.686 / pk.decay) : '—';
         const tr = document.createElement('tr');
         tr.innerHTML =
           '<td><strong>' + pk.freq.toFixed(1) + ' Hz</strong></td>' +
           '<td>' + n.name + ' ' + (n.cents >= 0 ? '+' : '') + n.cents + '¢</td>' +
+          '<td>' + formatCents(pk.vsTarget.cents) + ' ' + pk.vsTarget.name + '</td>' +
           '<td>' + pk.rel.toFixed(0) + ' dB</td>' +
           '<td>' + ring20 + '</td>' +
           '<td>' + q + '</td>' +
@@ -776,12 +946,14 @@
     }
 
     function downloadCsv() {
-      const lines = ['Frequency_Hz,Note,Cents,Level_dB,RingTime20dB_s,Q,Taps'];
+      const lines = ['Frequency_Hz,Note,Cents,Target,CentsFromTarget,Level_dB,RingTime20dB_s,Q,Taps'];
       const nTaps = $('view').value === 'avg' ? taps.length : 1;
       for (const pk of currentPeaks) {
         const n = noteName(pk.freq);
         lines.push([
-          pk.freq.toFixed(2), n.name, n.cents, pk.rel.toFixed(1),
+          pk.freq.toFixed(2), n.name, n.cents,
+          pk.vsTarget ? pk.vsTarget.name : '', pk.vsTarget ? pk.vsTarget.cents.toFixed(1) : '',
+          pk.rel.toFixed(1),
           pk.decay ? (20 / pk.decay).toFixed(3) : '',
           pk.decay ? Math.round(Math.PI * pk.freq * 8.686 / pk.decay) : '',
           nTaps
@@ -818,6 +990,23 @@
     $('fmin').addEventListener('change', render);
     $('fmax').addEventListener('change', render);
     $('view').addEventListener('change', render);
+
+    // Remember the target note on this device.
+    try {
+      const saved = JSON.parse(localStorage.getItem('tapTarget') || 'null');
+      if (saved) {
+        $('targetNote').value = saved.note;
+        $('targetOctave').value = saved.octave;
+      }
+    } catch (e) { /* storage unavailable */ }
+    for (const id of ['targetNote', 'targetOctave']) {
+      $(id).addEventListener('change', () => {
+        try {
+          localStorage.setItem('tapTarget', JSON.stringify({ note: $('targetNote').value, octave: $('targetOctave').value }));
+        } catch (e) { /* storage unavailable */ }
+        render();
+      });
+    }
     $('captureLen').addEventListener('change', () => {
       computeFftSize();
       if (taps.length) {
@@ -829,6 +1018,9 @@
     $('csvBtn').addEventListener('click', downloadCsv);
     $('wavBtn').addEventListener('click', downloadWav);
     window.addEventListener('resize', () => { render(); drawMeter(); });
+
+    // If localStorage restored an octave that isn't in the list, fall back.
+    if (!$('targetOctave').value) $('targetOctave').value = 'nearest';
 
     computeFftSize();
     render();
