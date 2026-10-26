@@ -1,0 +1,839 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fiddle Back Tap Analyzer</title>
+  <style>
+    body {
+      font-size: 20px;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 30px;
+    }
+    label {
+      font-size: 20px;
+    }
+    select, input[type=range], button {
+      font-size: 20px;
+      margin: 8px;
+    }
+    button {
+      padding: 8px 18px;
+    }
+    a {
+      color: #2a6fdb;
+    }
+    .panel {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    .settings {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 6px 24px;
+    }
+    #status {
+      font-weight: bold;
+      font-size: 24px;
+      margin: 12px;
+    }
+    #warn {
+      color: #c0392b;
+      min-height: 24px;
+    }
+    canvas {
+      width: 100%;
+      background: #fafafa;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    #spec { height: 340px; }
+    #wave { height: 110px; }
+    #meter { height: 28px; }
+    table {
+      margin: 10px auto;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 6px 12px;
+      border-bottom: 1px solid #ddd;
+    }
+    td button {
+      font-size: 16px;
+      padding: 4px 12px;
+      margin: 0;
+    }
+    .tips {
+      text-align: left;
+      max-width: 800px;
+      margin: 20px auto;
+      font-size: 18px;
+    }
+
+    /* Larger slider thumbs (same as the tone page) */
+    input[type=range] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 300px;
+      max-width: 90%;
+      height: 44px;
+      background: transparent;
+      cursor: pointer;
+    }
+    input[type=range]::-webkit-slider-runnable-track {
+      height: 10px;
+      background: #ccc;
+      border-radius: 5px;
+    }
+    input[type=range]::-moz-range-track {
+      height: 10px;
+      background: #ccc;
+      border-radius: 5px;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 40px;
+      height: 40px;
+      margin-top: -15px;
+      border-radius: 50%;
+      background: #2a6fdb;
+      border: 3px solid #fff;
+      box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+    }
+    input[type=range]::-moz-range-thumb {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: #2a6fdb;
+      border: 3px solid #fff;
+      box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+    }
+  </style>
+</head>
+<body>
+
+  <p><a href="index.html">&larr; Back to tone generator</a></p>
+
+  <h1>Fiddle Back Tap Analyzer</h1>
+  <p>
+    Press <strong>Start microphone</strong>, then tap the plate and let it ring.<br>
+    Each tap is captured automatically and its ringing frequencies are listed below.
+  </p>
+
+  <div class="panel">
+    <button id="micBtn">Start microphone</button>
+    <button id="undoBtn" disabled>Undo last tap</button>
+    <button id="clearBtn" disabled>Clear taps</button>
+
+    <div id="status">Microphone off</div>
+    <div id="warn"></div>
+
+    <div class="settings">
+      <div>
+        <label for="threshold">Trigger level:</label>
+        <span id="thresholdValue">-30</span> dB<br>
+        <input type="range" id="threshold" min="-60" max="-6" value="-30" step="1">
+      </div>
+      <div>
+        <label for="fmin">Low limit:</label>
+        <select id="fmin">
+          <option value="20">20 Hz</option>
+          <option value="40" selected>40 Hz</option>
+          <option value="60">60 Hz</option>
+          <option value="100">100 Hz</option>
+        </select>
+        <br>
+        <label for="fmax">High limit:</label>
+        <select id="fmax">
+          <option value="1000">1000 Hz</option>
+          <option value="2000" selected>2000 Hz</option>
+          <option value="5000">5000 Hz</option>
+        </select>
+      </div>
+      <div>
+        <label for="captureLen">Capture length:</label>
+        <select id="captureLen">
+          <option value="0.5">0.5 s</option>
+          <option value="1" selected>1 s</option>
+          <option value="2">2 s</option>
+        </select>
+        <br>
+        <label for="view">Show:</label>
+        <select id="view">
+          <option value="avg" selected>Average of taps</option>
+          <option value="last">Last tap</option>
+        </select>
+      </div>
+    </div>
+
+    <p style="margin:6px;">Input level (red line = trigger level)</p>
+    <canvas id="meter"></canvas>
+
+    <p style="margin:12px 0 6px;">Spectrum (<span id="tapCount">0</span> taps)</p>
+    <canvas id="spec"></canvas>
+
+    <p style="margin:12px 0 6px;">Last tap waveform</p>
+    <canvas id="wave"></canvas>
+
+    <h2>Peaks</h2>
+    <table id="peakTable">
+      <thead>
+        <tr>
+          <th>Frequency</th>
+          <th>Nearest note</th>
+          <th>Level</th>
+          <th>Ring time</th>
+          <th>Q</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="peakBody">
+        <tr><td colspan="6">No taps yet</td></tr>
+      </tbody>
+    </table>
+
+    <button id="csvBtn" disabled>Download peaks (CSV)</button>
+    <button id="wavBtn" disabled>Download last tap (WAV)</button>
+  </div>
+
+  <div class="tips">
+    <h3>Tips</h3>
+    <ul>
+      <li>Hold the plate lightly at a point that barely moves (or rest it on soft foam), tap firmly and briefly, and let it ring.</li>
+      <li>Keep the microphone 5&ndash;10 cm from the plate in a quiet room.</li>
+      <li>Do several taps with the same hold and tap points; the average makes the real peaks stand out. Press <strong>Clear taps</strong> before changing hold or tap position.</li>
+      <li>A plate has several modes, not one fundamental. Which ones show up depends on where you hold and tap it.</li>
+      <li><strong>Ring time</strong> is how long that peak takes to fade by 20 dB. Longer ring time and higher Q mean less damping. These are estimates.</li>
+      <li>A steady peak at 60 or 120 Hz is probably mains hum, not the plate.</li>
+      <li>If the trigger fires on room noise, move the trigger level up. If taps are missed, move it down.</li>
+      <li>On iPhone the Play tone may be quiet while the microphone is on.</li>
+    </ul>
+  </div>
+
+  <script>
+    const PRE_SEC = 0.02;    // waveform shown before the tap
+    const SKIP_SEC = 0.003;  // skip the impact click before analysing
+    const MAX_F = 6000;      // highest frequency stored per tap
+    const MAX_TAPS = 30;
+    const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+    const $ = id => document.getElementById(id);
+
+    let audioCtx = null;
+    let stream = null;
+    let srcNode = null;
+    let capNode = null;
+    let sinkNode = null;
+    let sr = 48000;
+
+    let ring = null;
+    let ringSize = 0;
+    let total = 0;
+
+    let state = 'off';   // off, listening, capturing, holdoff
+    let onsetAbs = 0;
+    let captureEnd = 0;
+    let holdoffUntil = 0;
+    let noiseRms = 1e-4;
+    let meterDb = -100;
+
+    let toneOsc = null;
+    let toneGain = null;
+    let toneBtn = null;
+    let muteUntil = 0;
+
+    let taps = [];       // { seg, wave, power, clipped }
+    let fftSize = 0;
+    let currentPeaks = [];
+
+    // ---------- Helpers ----------
+
+    function dbToLin(db) { return Math.pow(10, db / 20); }
+
+    function nextPow2(n) {
+      let p = 1;
+      while (p < n) p <<= 1;
+      return p;
+    }
+
+    function captureSamples() {
+      return Math.round(parseFloat($('captureLen').value) * sr);
+    }
+
+    function computeFftSize() {
+      fftSize = Math.min(Math.max(nextPow2(captureSamples() * 4), 1 << 15), 1 << 18);
+    }
+
+    function noteName(f) {
+      const n = 12 * Math.log2(f / 440) + 69;
+      const r = Math.round(n);
+      const cents = Math.round((n - r) * 100);
+      const name = NOTE_NAMES[((r % 12) + 12) % 12] + (Math.floor(r / 12) - 1);
+      return { name, cents };
+    }
+
+    function setStatus(text) { $('status').textContent = text; }
+    function setWarn(text) { $('warn').textContent = text; }
+
+    // ---------- FFT ----------
+
+    function fft(re, im) {
+      const n = re.length;
+      for (let i = 1, j = 0; i < n; i++) {
+        let bit = n >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) {
+          let t = re[i]; re[i] = re[j]; re[j] = t;
+          t = im[i]; im[i] = im[j]; im[j] = t;
+        }
+      }
+      for (let len = 2; len <= n; len <<= 1) {
+        const ang = -2 * Math.PI / len;
+        const wr = Math.cos(ang), wi = Math.sin(ang);
+        const half = len >> 1;
+        for (let i = 0; i < n; i += len) {
+          let cr = 1, ci = 0;
+          for (let j = 0; j < half; j++) {
+            const a = i + j, b = a + half;
+            const xr = re[b] * cr - im[b] * ci;
+            const xi = re[b] * ci + im[b] * cr;
+            re[b] = re[a] - xr; im[b] = im[a] - xi;
+            re[a] += xr; im[a] += xi;
+            const t = cr * wr - ci * wi;
+            ci = cr * wi + ci * wr;
+            cr = t;
+          }
+        }
+      }
+    }
+
+    // Power spectrum of one tap. The ring already decays, so only the
+    // first 1 ms is faded in and the last 20% is faded out.
+    function powerSpectrum(seg) {
+      const n = Math.min(seg.length, fftSize);
+      let mean = 0;
+      for (let i = 0; i < n; i++) mean += seg[i];
+      mean /= n;
+
+      const re = new Float64Array(fftSize);
+      const im = new Float64Array(fftSize);
+      const fadeIn = Math.max(1, Math.round(0.001 * sr));
+      const fadeOutStart = Math.floor(n * 0.8);
+      for (let i = 0; i < n; i++) {
+        let w = 1;
+        if (i < fadeIn) w = i / fadeIn;
+        if (i >= fadeOutStart) w = 0.5 * (1 + Math.cos(Math.PI * (i - fadeOutStart) / (n - fadeOutStart)));
+        re[i] = (seg[i] - mean) * w;
+      }
+      fft(re, im);
+
+      const df = sr / fftSize;
+      const kMax = Math.min(fftSize / 2, Math.ceil(MAX_F / df));
+      const power = new Float32Array(kMax);
+      for (let k = 0; k < kMax; k++) power[k] = re[k] * re[k] + im[k] * im[k];
+      return power;
+    }
+
+    function toDb(power) {
+      const db = new Float32Array(power.length);
+      for (let k = 0; k < power.length; k++) db[k] = 10 * Math.log10(power[k] + 1e-20);
+      return db;
+    }
+
+    function averagePower() {
+      const len = taps[0].power.length;
+      const avg = new Float32Array(len);
+      for (const t of taps) for (let k = 0; k < len; k++) avg[k] += t.power[k];
+      for (let k = 0; k < len; k++) avg[k] /= taps.length;
+      return avg;
+    }
+
+    // ---------- Peak finding ----------
+
+    function findPeaks(db, df, fmin, fmax, maxCount) {
+      const k0 = Math.max(2, Math.ceil(fmin / df));
+      const k1 = Math.min(db.length - 2, Math.floor(fmax / df));
+      let gmax = -Infinity;
+      for (let k = k0; k <= k1; k++) if (db[k] > gmax) gmax = db[k];
+
+      const cands = [];
+      for (let k = k0; k <= k1; k++) {
+        if (!(db[k] > db[k - 1] && db[k] >= db[k + 1] && db[k] > gmax - 45)) continue;
+
+        // Prominence: how far the peak stands above the valleys around it.
+        let minL = db[k];
+        for (let l = k - 1; l >= k0 && db[l] <= db[k]; l--) if (db[l] < minL) minL = db[l];
+        let minR = db[k];
+        for (let r = k + 1; r <= k1 && db[r] <= db[k]; r++) if (db[r] < minR) minR = db[r];
+        if (db[k] - Math.max(minL, minR) < 6) continue;
+
+        // Parabolic interpolation between bins.
+        const a = db[k - 1], b = db[k], c = db[k + 1];
+        const denom = a - 2 * b + c;
+        const p = denom !== 0 ? 0.5 * (a - c) / denom : 0;
+        cands.push({ freq: (k + p) * df, db: b - 0.25 * (a - c) * p });
+      }
+
+      cands.sort((x, y) => y.db - x.db);
+      const peaks = cands.slice(0, maxCount);
+      for (const pk of peaks) pk.rel = pk.db - gmax;
+      peaks.sort((x, y) => x.freq - y.freq);
+      return { peaks, gmax };
+    }
+
+    // Decay rate (dB per second) of one frequency in one tap, from a
+    // short-time single-frequency DFT followed by a straight-line fit.
+    function decayRate(seg, f) {
+      const frame = sr >= 44100 ? 4096 : 2048;
+      const hop = frame >> 2;
+      const env = [];
+      const w = 2 * Math.PI * f / sr;
+      for (let s = 0; s + frame <= seg.length; s += hop) {
+        let re = 0, im = 0;
+        for (let j = 0; j < frame; j++) {
+          const win = 0.5 - 0.5 * Math.cos(2 * Math.PI * j / (frame - 1));
+          const x = seg[s + j] * win;
+          const ph = w * (s + j);
+          re += x * Math.cos(ph);
+          im -= x * Math.sin(ph);
+        }
+        env.push({ t: s / sr, db: 10 * Math.log10(re * re + im * im + 1e-20) });
+      }
+      if (env.length < 4) return null;
+
+      let m = 0;
+      for (let i = 1; i < env.length; i++) if (env[i].db > env[m].db) m = i;
+      const pts = [];
+      for (let i = m; i < env.length && env[i].db > env[m].db - 30; i++) pts.push(env[i]);
+      if (pts.length < 3) return null;
+
+      let st = 0, sd = 0, stt = 0, std = 0;
+      for (const p of pts) { st += p.t; sd += p.db; stt += p.t * p.t; std += p.t * p.db; }
+      const n = pts.length;
+      const slope = (n * std - st * sd) / (n * stt - st * st);
+      return -slope;
+    }
+
+    function median(arr) {
+      const a = arr.slice().sort((x, y) => x - y);
+      const mid = a.length >> 1;
+      return a.length % 2 ? a[mid] : 0.5 * (a[mid - 1] + a[mid]);
+    }
+
+    // ---------- Capture ----------
+
+    function getRange(a, b) {
+      const out = new Float32Array(b - a);
+      for (let i = a; i < b; i++) out[i - a] = ring[((i % ringSize) + ringSize) % ringSize];
+      return out;
+    }
+
+    function ingest(chunk) {
+      const startAbs = total;
+      for (let i = 0; i < chunk.length; i++) ring[(total + i) % ringSize] = chunk[i];
+      total += chunk.length;
+
+      let pk = 0, sum = 0;
+      for (let i = 0; i < chunk.length; i++) {
+        const v = Math.abs(chunk[i]);
+        if (v > pk) pk = v;
+        sum += chunk[i] * chunk[i];
+      }
+      const rms = Math.sqrt(sum / chunk.length);
+      const pkDb = 20 * Math.log10(pk + 1e-9);
+      meterDb = Math.max(pkDb, meterDb - 1.5);
+
+      const thr = dbToLin(parseFloat($('threshold').value));
+      const now = audioCtx.currentTime;
+
+      if (state === 'listening') {
+        if (toneOsc || now < muteUntil) {
+          noiseRms = 0.95 * noiseRms + 0.05 * rms;
+          return;
+        }
+        if (pk > thr && pk > noiseRms * 4) {
+          let i = 0;
+          while (i < chunk.length && Math.abs(chunk[i]) < thr * 0.5) i++;
+          onsetAbs = startAbs + i;
+          captureEnd = onsetAbs + Math.round(SKIP_SEC * sr) + captureSamples();
+          state = 'capturing';
+          setStatus('Capturing…');
+        } else {
+          noiseRms = 0.95 * noiseRms + 0.05 * rms;
+        }
+      } else if (state === 'capturing') {
+        if (total >= captureEnd) finishCapture();
+      } else if (state === 'holdoff') {
+        if (now >= holdoffUntil && pk < thr * 0.5) {
+          state = 'listening';
+          setStatus('Listening — tap the plate');
+        }
+      }
+    }
+
+    function finishCapture() {
+      const pre = Math.round(PRE_SEC * sr);
+      const wave = getRange(onsetAbs - pre, captureEnd);
+      const seg = getRange(onsetAbs + Math.round(SKIP_SEC * sr), captureEnd);
+
+      let clipped = false;
+      for (let i = 0; i < wave.length; i++) if (Math.abs(wave[i]) > 0.99) { clipped = true; break; }
+
+      taps.push({ seg, wave, power: powerSpectrum(seg), clipped });
+      if (taps.length > MAX_TAPS) taps.shift();
+
+      setWarn(clipped ? 'That tap was too loud and clipped. Tap softer or move the microphone back.' : '');
+      state = 'holdoff';
+      holdoffUntil = audioCtx.currentTime + 0.5;
+      setStatus('Got tap ' + taps.length + ' — waiting for ring to fade');
+      render();
+    }
+
+    async function startMic() {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        });
+      } catch (e) {
+        setStatus('Microphone not available');
+        setWarn('Allow microphone access for this page in your browser settings, then try again.');
+        audioCtx.close();
+        audioCtx = null;
+        return;
+      }
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+      sr = audioCtx.sampleRate;
+      ringSize = Math.ceil(sr * 4);
+      ring = new Float32Array(ringSize);
+      total = 0;
+      noiseRms = 1e-4;
+      computeFftSize();
+
+      srcNode = audioCtx.createMediaStreamSource(stream);
+      sinkNode = audioCtx.createGain();
+      sinkNode.gain.value = 0;
+      sinkNode.connect(audioCtx.destination);
+
+      try {
+        const code = `
+          class Cap extends AudioWorkletProcessor {
+            constructor() { super(); this.buf = new Float32Array(1024); this.n = 0; }
+            process(inputs) {
+              const ch = inputs[0] && inputs[0][0];
+              if (ch) {
+                for (let i = 0; i < ch.length; i++) {
+                  this.buf[this.n++] = ch[i];
+                  if (this.n === this.buf.length) { this.port.postMessage(this.buf.slice()); this.n = 0; }
+                }
+              }
+              return true;
+            }
+          }
+          registerProcessor('cap', Cap);`;
+        const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
+        await audioCtx.audioWorklet.addModule(url);
+        capNode = new AudioWorkletNode(audioCtx, 'cap');
+        capNode.port.onmessage = e => ingest(e.data);
+      } catch (e) {
+        // Older browsers: fall back to ScriptProcessor.
+        capNode = audioCtx.createScriptProcessor(2048, 1, 1);
+        capNode.onaudioprocess = e => ingest(new Float32Array(e.inputBuffer.getChannelData(0)));
+      }
+      srcNode.connect(capNode);
+      capNode.connect(sinkNode);
+
+      state = 'listening';
+      setStatus('Listening — tap the plate');
+      setWarn('');
+      $('micBtn').textContent = 'Stop microphone';
+      requestAnimationFrame(drawMeter);
+    }
+
+    function stopMic() {
+      stopTone();
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      if (audioCtx) audioCtx.close();
+      audioCtx = null;
+      stream = null;
+      state = 'off';
+      setStatus('Microphone off');
+      $('micBtn').textContent = 'Start microphone';
+      meterDb = -100;
+      drawMeter();
+    }
+
+    // ---------- Tone playback ----------
+
+    function stopTone() {
+      if (toneOsc) {
+        const now = audioCtx.currentTime;
+        toneGain.gain.setValueAtTime(toneGain.gain.value, now);
+        toneGain.gain.linearRampToValueAtTime(0, now + 0.03);
+        toneOsc.stop(now + 0.05);
+        toneOsc = null;
+        muteUntil = now + 0.5;
+      }
+      if (toneBtn) toneBtn.textContent = 'Play';
+      toneBtn = null;
+    }
+
+    function playTone(freq, btn) {
+      if (!audioCtx) return;
+      const same = toneBtn === btn;
+      stopTone();
+      if (same) return;
+
+      const now = audioCtx.currentTime;
+      toneGain = audioCtx.createGain();
+      toneGain.gain.setValueAtTime(0, now);
+      toneGain.gain.linearRampToValueAtTime(0.3, now + 0.03);
+      toneGain.connect(audioCtx.destination);
+      toneOsc = audioCtx.createOscillator();
+      toneOsc.type = 'sine';
+      toneOsc.frequency.setValueAtTime(freq, now);
+      toneOsc.connect(toneGain);
+      toneOsc.start();
+      toneBtn = btn;
+      btn.textContent = 'Stop';
+    }
+
+    // ---------- Drawing ----------
+
+    function setupCanvas(c) {
+      const dpr = window.devicePixelRatio || 1;
+      const w = c.clientWidth, h = c.clientHeight;
+      c.width = Math.round(w * dpr);
+      c.height = Math.round(h * dpr);
+      const g = c.getContext('2d');
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      g.clearRect(0, 0, w, h);
+      return { g, w, h };
+    }
+
+    function drawMeter() {
+      const { g, w, h } = setupCanvas($('meter'));
+      const toX = db => Math.max(0, Math.min(1, (db + 80) / 80)) * w;
+      g.fillStyle = '#2a6fdb';
+      g.fillRect(0, 4, toX(meterDb), h - 8);
+      g.strokeStyle = '#c0392b';
+      g.lineWidth = 3;
+      const tx = toX(parseFloat($('threshold').value));
+      g.beginPath(); g.moveTo(tx, 0); g.lineTo(tx, h); g.stroke();
+      if (state !== 'off') requestAnimationFrame(drawMeter);
+    }
+
+    function drawSpectrum(db, overlay, peaks, gmax) {
+      const { g, w, h } = setupCanvas($('spec'));
+      const fmin = parseFloat($('fmin').value);
+      const fmax = parseFloat($('fmax').value);
+      const L = 50, R = 12, T = 12, B = 30;
+      const top = Math.ceil(gmax / 10) * 10;
+      const range = 60;
+      const x = f => L + Math.log(f / fmin) / Math.log(fmax / fmin) * (w - L - R);
+      const y = d => T + Math.max(0, Math.min(1, (top - d) / range)) * (h - T - B);
+
+      g.font = '13px Arial';
+      g.strokeStyle = '#ddd';
+      g.fillStyle = '#555';
+      g.lineWidth = 1;
+      g.textAlign = 'center';
+      for (const f of [20, 30, 50, 100, 200, 300, 500, 1000, 2000, 3000, 5000]) {
+        if (f < fmin || f > fmax) continue;
+        g.beginPath(); g.moveTo(x(f), T); g.lineTo(x(f), h - B); g.stroke();
+        g.fillText(f >= 1000 ? (f / 1000) + 'k' : f, x(f), h - B + 16);
+      }
+      g.textAlign = 'right';
+      for (let d = 0; d <= range; d += 10) {
+        g.beginPath(); g.moveTo(L, y(top - d)); g.lineTo(w - R, y(top - d)); g.stroke();
+        g.fillText(d === 0 ? '0' : '-' + d, L - 6, y(top - d) + 4);
+      }
+      g.textAlign = 'center';
+      g.fillText('Hz', w - R - 10, h - 4);
+
+      const df = sr / fftSize;
+      const k0 = Math.max(1, Math.floor(fmin / df));
+      const k1 = Math.min(db.length - 1, Math.ceil(fmax / df));
+      const plot = (arr, color, width) => {
+        g.strokeStyle = color;
+        g.lineWidth = width;
+        g.beginPath();
+        for (let k = k0; k <= k1; k++) {
+          const px = x(k * df), py = y(arr[k]);
+          if (k === k0) g.moveTo(px, py); else g.lineTo(px, py);
+        }
+        g.stroke();
+      };
+      if (overlay) plot(overlay, '#bbb', 1);
+      plot(db, '#2a6fdb', 1.5);
+
+      g.fillStyle = '#c0392b';
+      g.font = 'bold 13px Arial';
+      for (const pk of peaks) {
+        const px = x(pk.freq), py = y(pk.db);
+        g.beginPath(); g.arc(px, py, 4, 0, 2 * Math.PI); g.fill();
+        g.fillText(pk.freq.toFixed(1), px, Math.max(T + 10, py - 8));
+      }
+    }
+
+    function drawWave(wave) {
+      const { g, w, h } = setupCanvas($('wave'));
+      g.strokeStyle = '#ddd';
+      g.beginPath(); g.moveTo(0, h / 2); g.lineTo(w, h / 2); g.stroke();
+      if (!wave) return;
+      let peak = 1e-9;
+      for (let i = 0; i < wave.length; i++) peak = Math.max(peak, Math.abs(wave[i]));
+      g.strokeStyle = '#2a6fdb';
+      g.beginPath();
+      const per = wave.length / w;
+      for (let px = 0; px < w; px++) {
+        let lo = 1, hi = -1;
+        const a = Math.floor(px * per), b = Math.min(wave.length, Math.floor((px + 1) * per) + 1);
+        for (let i = a; i < b; i++) { if (wave[i] < lo) lo = wave[i]; if (wave[i] > hi) hi = wave[i]; }
+        g.moveTo(px + 0.5, h / 2 - hi / peak * (h / 2 - 4));
+        g.lineTo(px + 0.5, h / 2 - lo / peak * (h / 2 - 4));
+      }
+      g.stroke();
+    }
+
+    // ---------- Results ----------
+
+    function render() {
+      $('tapCount').textContent = taps.length;
+      $('undoBtn').disabled = taps.length === 0;
+      $('clearBtn').disabled = taps.length === 0;
+      $('csvBtn').disabled = taps.length === 0;
+      $('wavBtn').disabled = taps.length === 0;
+
+      if (taps.length === 0) {
+        currentPeaks = [];
+        setupCanvas($('spec'));
+        drawWave(null);
+        $('peakBody').innerHTML = '<tr><td colspan="6">No taps yet</td></tr>';
+        return;
+      }
+
+      const last = taps[taps.length - 1];
+      const useAvg = $('view').value === 'avg';
+      const db = toDb(useAvg ? averagePower() : last.power);
+      const overlay = useAvg && taps.length > 1 ? toDb(last.power) : null;
+      const fmin = parseFloat($('fmin').value);
+      const fmax = parseFloat($('fmax').value);
+      const { peaks, gmax } = findPeaks(db, sr / fftSize, fmin, fmax, 8);
+
+      const usedTaps = useAvg ? taps : [last];
+      for (const pk of peaks) {
+        const rates = usedTaps.map(t => decayRate(t.seg, pk.freq)).filter(d => d !== null && d > 0.5);
+        pk.decay = rates.length ? median(rates) : null;
+      }
+      currentPeaks = peaks;
+
+      drawSpectrum(db, overlay, peaks, gmax);
+      drawWave(last.wave);
+
+      const body = $('peakBody');
+      body.innerHTML = '';
+      if (peaks.length === 0) {
+        body.innerHTML = '<tr><td colspan="6">No clear peaks in this range</td></tr>';
+        return;
+      }
+      for (const pk of peaks) {
+        const n = noteName(pk.freq);
+        const ring20 = pk.decay ? (20 / pk.decay).toFixed(2) + ' s' : '—';
+        const q = pk.decay ? Math.round(Math.PI * pk.freq * 8.686 / pk.decay) : '—';
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td><strong>' + pk.freq.toFixed(1) + ' Hz</strong></td>' +
+          '<td>' + n.name + ' ' + (n.cents >= 0 ? '+' : '') + n.cents + '¢</td>' +
+          '<td>' + pk.rel.toFixed(0) + ' dB</td>' +
+          '<td>' + ring20 + '</td>' +
+          '<td>' + q + '</td>' +
+          '<td><button>Play</button></td>';
+        const btn = tr.querySelector('button');
+        btn.addEventListener('click', () => playTone(pk.freq, btn));
+        body.appendChild(tr);
+      }
+    }
+
+    function download(name, blob) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    function stamp() {
+      const d = new Date();
+      const p = n => String(n).padStart(2, '0');
+      return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+    }
+
+    function downloadCsv() {
+      const lines = ['Frequency_Hz,Note,Cents,Level_dB,RingTime20dB_s,Q,Taps'];
+      const nTaps = $('view').value === 'avg' ? taps.length : 1;
+      for (const pk of currentPeaks) {
+        const n = noteName(pk.freq);
+        lines.push([
+          pk.freq.toFixed(2), n.name, n.cents, pk.rel.toFixed(1),
+          pk.decay ? (20 / pk.decay).toFixed(3) : '',
+          pk.decay ? Math.round(Math.PI * pk.freq * 8.686 / pk.decay) : '',
+          nTaps
+        ].join(','));
+      }
+      download('tap-peaks-' + stamp() + '.csv', new Blob([lines.join('\n') + '\n'], { type: 'text/csv' }));
+    }
+
+    function downloadWav() {
+      const wave = taps[taps.length - 1].wave;
+      const buf = new ArrayBuffer(44 + wave.length * 2);
+      const v = new DataView(buf);
+      const str = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+      str(0, 'RIFF'); v.setUint32(4, 36 + wave.length * 2, true); str(8, 'WAVE');
+      str(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      str(36, 'data'); v.setUint32(40, wave.length * 2, true);
+      for (let i = 0; i < wave.length; i++) {
+        const s = Math.max(-1, Math.min(1, wave[i]));
+        v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      }
+      download('tap-' + stamp() + '.wav', new Blob([buf], { type: 'audio/wav' }));
+    }
+
+    // ---------- Wiring ----------
+
+    $('micBtn').addEventListener('click', () => { if (state === 'off') startMic(); else stopMic(); });
+    $('undoBtn').addEventListener('click', () => { taps.pop(); render(); });
+    $('clearBtn').addEventListener('click', () => { taps = []; setWarn(''); render(); });
+    $('threshold').addEventListener('input', () => {
+      $('thresholdValue').textContent = $('threshold').value;
+      if (state === 'off') drawMeter();
+    });
+    $('fmin').addEventListener('change', render);
+    $('fmax').addEventListener('change', render);
+    $('view').addEventListener('change', render);
+    $('captureLen').addEventListener('change', () => {
+      computeFftSize();
+      if (taps.length) {
+        taps = [];
+        setWarn('Capture length changed, so the earlier taps were cleared.');
+      }
+      render();
+    });
+    $('csvBtn').addEventListener('click', downloadCsv);
+    $('wavBtn').addEventListener('click', downloadWav);
+    window.addEventListener('resize', () => { render(); drawMeter(); });
+
+    computeFftSize();
+    render();
+    drawMeter();
+  </script>
+
+</body>
+</html>
