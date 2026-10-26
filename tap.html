@@ -186,6 +186,9 @@
 
       <div id="targetReadout">Tap the plate to compare its largest peak with the target note.</div>
       <canvas id="tuner"></canvas>
+
+      <button id="synthBtn" disabled>&#9654; Play tap as detected</button>
+      <button id="synthTunedBtn" disabled>&#9654; Play tap tuned to target</button>
     </div>
 
     <div class="settings">
@@ -270,7 +273,8 @@
       <li><strong>Ring time</strong> is how long that peak takes to fade by 20 dB. Longer ring time and higher Q mean less damping. These are estimates.</li>
       <li>A steady peak at 60 or 120 Hz is probably mains hum, not the plate.</li>
       <li>If the trigger fires on room noise, move the trigger level up. If taps are missed, move it down.</li>
-      <li>On iPhone the Play tone may be quiet while the microphone is on.</li>
+      <li><strong>Play tap as detected</strong> rebuilds the tap from its peaks: their frequencies, levels and ring times. <strong>Play tap tuned to</strong> plays the same tap shifted so the largest peak lands exactly on the target note, so you can hear the difference. In the table, <strong>Tone</strong> holds a steady sine and <strong>Tap</strong> plays a tap of that one peak.</li>
+      <li>On iPhone, played sounds may be quiet while the microphone is on. Stop the microphone to hear them louder.</li>
     </ul>
   </div>
 
@@ -301,8 +305,11 @@
     let noiseRms = 1e-4;
     let meterDb = -100;
 
+    let outCtx = null;
+    let toneCtx = null;
     let toneOsc = null;
     let toneGain = null;
+    let tunedRatio = 1;
     let toneBtn = null;
     let muteUntil = 0;
 
@@ -658,37 +665,117 @@
 
     // ---------- Tone playback ----------
 
+    // Playback uses the microphone's context when it is running, otherwise
+    // a separate output-only context, so tones still play with the mic off.
+    function getOutCtx() {
+      if (audioCtx) return audioCtx;
+      if (!outCtx) outCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (outCtx.state === 'suspended') outCtx.resume();
+      return outCtx;
+    }
+
+    // Keep the trigger from catching our own playback.
+    function muteMicUntil(t) {
+      if (audioCtx) muteUntil = Math.max(muteUntil, t);
+    }
+
     function stopTone() {
       if (toneOsc) {
-        const now = audioCtx.currentTime;
+        const now = toneCtx.currentTime;
         toneGain.gain.setValueAtTime(toneGain.gain.value, now);
         toneGain.gain.linearRampToValueAtTime(0, now + 0.03);
         toneOsc.stop(now + 0.05);
         toneOsc = null;
-        muteUntil = now + 0.5;
+        if (toneCtx === audioCtx) muteMicUntil(now + 0.5);
       }
-      if (toneBtn) toneBtn.textContent = 'Play';
+      if (toneBtn) toneBtn.textContent = 'Tone';
       toneBtn = null;
     }
 
     function playTone(freq, btn) {
-      if (!audioCtx) return;
       const same = toneBtn === btn;
       stopTone();
       if (same) return;
 
-      const now = audioCtx.currentTime;
-      toneGain = audioCtx.createGain();
+      toneCtx = getOutCtx();
+      const now = toneCtx.currentTime;
+      toneGain = toneCtx.createGain();
       toneGain.gain.setValueAtTime(0, now);
       toneGain.gain.linearRampToValueAtTime(0.3, now + 0.03);
-      toneGain.connect(audioCtx.destination);
-      toneOsc = audioCtx.createOscillator();
+      toneGain.connect(toneCtx.destination);
+      toneOsc = toneCtx.createOscillator();
       toneOsc.type = 'sine';
       toneOsc.frequency.setValueAtTime(freq, now);
       toneOsc.connect(toneGain);
       toneOsc.start();
       toneBtn = btn;
       btn.textContent = 'Stop';
+    }
+
+    // Synthetic tap: a short knock followed by decaying sines, one per
+    // partial. Each partial is { freq, amp (0..1), decay (dB per second) }.
+    function synthTap(partials) {
+      if (!partials.length) return;
+      stopTone();
+      const ctx = getOutCtx();
+      const now = ctx.currentTime + 0.02;
+
+      const master = ctx.createGain();
+      const total = partials.reduce((s, p) => s + p.amp, 0);
+      master.gain.value = 0.6 / Math.max(1, total);
+      master.connect(ctx.destination);
+
+      let longest = 0;
+      for (const p of partials) {
+        const decay = p.decay && p.decay > 0.5 ? p.decay : 30;
+        const len = Math.min(8, 80 / decay);   // time to fall 80 dB
+        longest = Math.max(longest, len);
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = p.freq;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0, now);
+        g.gain.linearRampToValueAtTime(p.amp, now + 0.002);
+        g.gain.exponentialRampToValueAtTime(p.amp * 1e-4, now + 0.002 + len);
+        osc.connect(g);
+        g.connect(master);
+        osc.start(now);
+        osc.stop(now + len + 0.05);
+      }
+
+      // The knock: a few milliseconds of filtered noise.
+      const n = Math.round(ctx.sampleRate * 0.015);
+      const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+      const ch = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) ch[i] = (Math.random() * 2 - 1) * Math.exp(-i / (n / 5));
+      const knock = ctx.createBufferSource();
+      knock.buffer = buf;
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = 1500;
+      bp.Q.value = 0.7;
+      const kg = ctx.createGain();
+      kg.gain.value = 0.15;
+      knock.connect(bp);
+      bp.connect(kg);
+      kg.connect(master);
+      knock.start(now);
+
+      if (ctx === audioCtx) muteMicUntil(now + longest + 0.3);
+      setTimeout(() => master.disconnect(), (longest + 0.5) * 1000);
+    }
+
+    // A fast-fading peak looks lower on the spectrum than its starting
+    // amplitude (spectral height ~ amplitude / decay rate), so scale the
+    // level back up by the decay rate to get the starting amplitude.
+    function peakPartials(peaks, ratio) {
+      const parts = peaks.map(pk => {
+        const decay = pk.decay && pk.decay > 0.5 ? pk.decay : 30;
+        return { freq: pk.freq * ratio, amp: Math.pow(10, pk.rel / 20) * decay, decay };
+      });
+      const top = Math.max(...parts.map(p => p.amp));
+      for (const p of parts) p.amp /= top;
+      return parts;
     }
 
     // ---------- Drawing ----------
@@ -851,6 +938,9 @@
       $('clearBtn').disabled = taps.length === 0;
       $('csvBtn').disabled = taps.length === 0;
       $('wavBtn').disabled = taps.length === 0;
+      $('synthBtn').disabled = true;
+      $('synthTunedBtn').disabled = true;
+      $('synthTunedBtn').innerHTML = '&#9654; Play tap tuned to target';
 
       if (taps.length === 0) {
         currentPeaks = [];
@@ -893,6 +983,10 @@
         $('targetCents').style.color =
           Math.abs(c) <= 5 ? '#1e8e3e' : Math.abs(c) <= 20 ? '#d4a017' : '#c0392b';
         drawTuner(c);
+        tunedRatio = target.freq / biggest.freq;
+        $('synthBtn').disabled = false;
+        $('synthTunedBtn').disabled = false;
+        $('synthTunedBtn').innerHTML = '&#9654; Play tap tuned to ' + target.name;
       } else {
         $('targetReadout').textContent = 'No clear peak to compare.';
         drawTuner(null);
@@ -923,9 +1017,10 @@
           '<td>' + pk.rel.toFixed(0) + ' dB</td>' +
           '<td>' + ring20 + '</td>' +
           '<td>' + q + '</td>' +
-          '<td><button>Play</button></td>';
-        const btn = tr.querySelector('button');
-        btn.addEventListener('click', () => playTone(pk.freq, btn));
+          '<td><button>Tone</button> <button>Tap</button></td>';
+        const [toneB, tapB] = tr.querySelectorAll('button');
+        toneB.addEventListener('click', () => playTone(pk.freq, toneB));
+        tapB.addEventListener('click', () => synthTap([{ freq: pk.freq, amp: 1, decay: pk.decay }]));
         body.appendChild(tr);
       }
     }
@@ -1015,6 +1110,8 @@
       }
       render();
     });
+    $('synthBtn').addEventListener('click', () => synthTap(peakPartials(currentPeaks, 1)));
+    $('synthTunedBtn').addEventListener('click', () => synthTap(peakPartials(currentPeaks, tunedRatio)));
     $('csvBtn').addEventListener('click', downloadCsv);
     $('wavBtn').addEventListener('click', downloadWav);
     window.addEventListener('resize', () => { render(); drawMeter(); });
